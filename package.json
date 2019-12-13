@@ -1,13 +1,13 @@
 {
   "name": "mcbuilder",
   "version": "1.0.0",
-  "description": "",
+  "description": "Command line modpack builder for Minecraft!",
   "main": "src/index.ts",
   "scripts": {
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1"
   },
-  "author": "",
+  "author": "lukas2005",
   "license": "GPL-3.0",
   "dependencies": {
     "7zip-bin": "^5.0.3",
@@ -30,5 +30,13 @@
   "devDependencies": {
     "@types/fs-extra": "^8.0.1",
     "typescript": "^3.7.3"
-  }
+  },
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/lukas2005/mcbuilder.git"
+  },
+  "bugs": {
+    "url": "https://github.com/lukas2005/mcbuilder/issues"
+  },
+  "homepage": "https://github.com/lukas2005/mcbuilder#readme"
 }
