@@ -1,7 +1,10 @@
 #!/usr/bin/env node
-import fs from "fs";
+import fs from "fs-extra";
 import path from "path";
+import os from "os";
 
+import sevenBin from "7zip-bin";
+import Zip from "node-7z";
 import axios from "axios";
 import promptly from 'promptly';
 import commander from 'commander';
@@ -11,7 +14,8 @@ import * as curse from "./utils/cursemeta";
 import { downloadFile } from "./utils/downloader";
 import { Manifest } from "./objects/Manifest";
 import { CFFile } from "./objects/CFFile";
-import { IFile } from "./objects/IFile";
+import { IFile, DepType } from "./objects/IFile";
+
 
 const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json")).toString("utf8"));
 
@@ -23,30 +27,11 @@ function findManifest(directory?: string) {
     return path.resolve("manifest.json");
 }
 
-export let manifest: Manifest;
+let manifest: Manifest;
 let manifestPath: string;
 
 function saveManifest() {
-    let mn = { ...manifest };
-
-    mn = Object.assign(new Manifest("", "", "", ""), mn);
-
-    mn.dependencies.map(el => el.toJSON());
-
-    fs.writeFileSync(manifestPath, JSON.stringify(manifest, null, "\t"))
-}
-
-function addDep(dep: IFile) {
-    if (dep instanceof CFFile) {
-        console.log(dep)
-        let ls = manifest.dependencies.filter(el => el.equals(dep));
-        if (ls.length > 0) {
-            manifest.dependencies = manifest.dependencies.filter(el => !ls.includes(el));
-        } else {
-        }
-        manifest.dependencies.push(dep);
-    }
-    //process.exit(0);
+    fs.writeFileSync(manifestPath, JSON.stringify(manifest.toJSON(), null, "\t"))
 }
 
 function loadManifest() {
@@ -55,20 +40,13 @@ function loadManifest() {
             manifestPath = findManifest();
 
             if (fs.existsSync(manifestPath)) {
-                let mn = fs.readFileSync(manifestPath).toString("utf8");
-                manifest = JSON.parse(mn);
+                const mn = fs.readFileSync(manifestPath).toString("utf8");
 
+                manifest = await Manifest.fromJSON(JSON.parse(mn));
 
-                await Promise.all(manifest.dependencies.map((el: any) => {
-                    if (typeof el.projectId === 'number') {
-                        return CFFile.fromJSON(el);
-                    }
-                })).then(deps => {
-                    manifest.dependencies = deps;
+                //console.log(manifest)
 
-                    addDep(deps[0]);
-                    resolve();
-                });
+                resolve(manifest)
             } else {
                 reject();
             }
@@ -87,7 +65,7 @@ function checkFS() {
 
         fsFiles.forEach(el => {
             if (!mnFiles.includes(el)) {
-                console.log(el)
+                //console.log(el)
                 fs.unlinkSync(path.join("mods", el));
             }
         })
@@ -111,6 +89,16 @@ program
         manifest.gameVersion = await promptly.prompt(`Enter game version [${manifest.gameVersion}]:`, {
             default: manifest.gameVersion
         });
+        try {
+            const raw = await axios.get("https://files.minecraftforge.net/maven/net/minecraftforge/forge/promotions_slim.json");
+            const data = raw.data
+            manifest.forgeVersion = data.promos[`${manifest.gameVersion}-latest`];
+        } catch (e) {
+            console.debug(e);
+        }
+        manifest.forgeVersion = await promptly.prompt(`Enter forge version [${manifest.forgeVersion}]:`, {
+            default: manifest.forgeVersion
+        });
         manifest.description = await promptly.prompt(`Enter description${manifest.description != "" ? ` [${manifest.description}]` : ""}:`, {
             default: manifest.description
         });
@@ -132,7 +120,7 @@ program
 
         let ref: IFile = null;
         const ne: IFile[] = [];
-        console.log(url)
+        //console.log(url)
         manifest.dependencies.forEach(el => {
             if (el instanceof CFFile && el.projectId === parseInt(url)) {
                 ref = el;
@@ -147,17 +135,21 @@ program
         if (!fs.existsSync("mods")) fs.mkdirSync("mods");
 
         const p = path.join("mods", ref.getFileName());
-        
+
         if (fs.existsSync(p))
             fs.unlinkSync(p);
     });
 program
     .command("add <url>")
     .option("-f, --file <fileId>", "If adding by CurseForge project id, use this to specify the file, otherwise latest for current game version is used")
+    .option("-C, --client", "If specified, the file will be added as a client-only dependency.")
+    .option("-S, --server", "If specified, the file will be added as a server-only dependency.")
     .action(async (url: string, options) => {
-        const ref = await CFFile.create(parseInt(url), options.file ? parseInt(options.file) : undefined);
+        const ref = await CFFile.create(manifest, parseInt(url), options.file ? parseInt(options.file) : undefined);
 
-        addDep(ref);
+        ref.depType = options.client ? DepType.CLIENT : options.server ? DepType.SERVER : DepType.COMMON;
+
+        manifest.addDep(ref);
         //console.log(ref)
         saveManifest();
 
@@ -171,8 +163,6 @@ program
 program
     .command("install")
     .option("-U, --update", "If specified, the program will look for updates for all the mods it knows sources of.")
-    .option("-C, --client", "If specified, the file will be added as a client-only dependency.")
-    .option("-S, --server", "If specified, the file will be added as a server-only dependency.")
     .action(async (options) => {
         if (!fs.existsSync("mods")) fs.mkdirSync("mods");
 
@@ -194,7 +184,7 @@ program
                         //console.dir((await el.getUpdateRef()).getFileName());
                     }
                 }
-    
+
                 if (!fs.existsSync(p)) {
                     downloadFile(p, await el.getDownloadUrl(), percent => {
                         console.log(`Downloading ${el.getFileName()}. ${percent}% Done`);
@@ -207,11 +197,68 @@ program
         await Promise.all(promises);
 
         updated.forEach(el => {
-            addDep(el);
+            manifest.addDep(el);
         });
 
         //console.dir((manifest.dependencies[0] as CFRef).projectInfo.gameVersionLatestFiles)
     });
+program
+    .command("build")
+    .option("-f, --format [format]", `select the export format, default is CurseForge (Twitch) format
+    Formats:
+    cf  - CurseForge (Twitch)
+    raw - Raw minecraft profile`, "cf")
+    .action((options) => {
+        switch (options.format) {
+            case ("cf"):
+                const cfManifest = {
+                    minecraft: {
+                        version: manifest.gameVersion,
+                        modLoaders: [
+                            {
+                                id: `forge-${manifest.forgeVersion}`,
+                                primary: true
+                            }
+                        ]
+                    },
+                    manifestType: "minecraftModpack",
+                    manifestVersion: 1,
+                    name: manifest.name,
+                    files: [...manifest.dependencies]
+                        .filter(el => el instanceof CFFile)
+                        //.map(el => el.toJSON())
+                        .map((el: CFFile) => {
+                            return {
+                                projectID: el.projectId,
+                                fileID: el.fileId,
+                                required: true
+                            }
+                        }),
+
+                }
+
+                if (fs.existsSync("build")) fs.rmdirSync("build", { recursive: true });
+                if (fs.existsSync("out")) fs.rmdirSync("out", { recursive: true });
+
+                fs.mkdirSync("build");
+                fs.mkdirSync("out");
+
+                fs.writeFileSync(path.join("build", "manifest.json"), JSON.stringify(cfManifest, null, "\t"));
+
+                if (fs.existsSync("overrides")) fs.copySync("overrides", path.join("build", "overrides"), { recursive: true });
+
+                process.chdir("build");
+                (Zip as any).add(path.join("..", "out", `${manifest.name}.zip`), path.join("**"), {
+                    $bin: sevenBin.path7za,
+                    recursive: true,
+                })
+                process.chdir("..");
+
+                break;
+            case ("raw"):
+                break;
+        }
+    })
 
 loadManifest().then(() => {
     program.parse(process.argv);
@@ -219,6 +266,6 @@ loadManifest().then(() => {
     saveManifest();
 }).catch((e) => {
     console.error("Manifest not found.");
-    //console.debug(e);
+    console.debug(e);
     program.parse(process.argv)
 })
