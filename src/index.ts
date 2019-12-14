@@ -248,12 +248,14 @@ program
                 if (fs.existsSync("overrides")) fs.copySync("overrides", path.join("build", "overrides"), { recursive: true });
 
                 process.chdir("build");
-                (Zip as any).add(path.join("..", "out", `${manifest.name}.zip`), path.join("**"), {
+                const z = (Zip as any).add(path.join("..", "out", `${manifest.name}.zip`), path.join("**"), {
                     $bin: sevenBin.path7za,
                     recursive: true,
                 })
-                process.chdir("..");
-                fs.removeSync("build");
+                z.on("end", () => {
+                    process.chdir("..");
+                    fs.removeSync("build");
+                })
 
                 break;
             case ("raw"):
