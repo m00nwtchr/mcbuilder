@@ -253,6 +253,7 @@ program
                     recursive: true,
                 })
                 process.chdir("..");
+                fs.removeSync("build");
 
                 break;
             case ("raw"):
