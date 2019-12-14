@@ -1,11 +1,12 @@
 {
   "name": "mcbuilder",
-  "version": "1.0.0",
+  "version": "1.0.1",
   "description": "Command line modpack builder for Minecraft!",
   "main": "src/index.ts",
   "scripts": {
     "build": "tsc",
-    "test": "echo \"Error: no test specified\" && exit 1"
+    "test": "echo \"Error: no test specified\" && exit 1",
+    "prepublishOnly": "npm run build"
   },
   "author": "lukas2005",
   "license": "GPL-3.0",
