@@ -1,6 +1,6 @@
 {
   "name": "mcbuilder",
-  "version": "1.0.1",
+  "version": "1.0.2",
   "description": "Command line modpack builder for Minecraft!",
   "main": "src/index.ts",
   "scripts": {
