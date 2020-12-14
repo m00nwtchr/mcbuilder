@@ -4,6 +4,7 @@
   "description": "Command line modpack builder for Minecraft!",
   "main": "src/index.ts",
   "scripts": {
+    "watch": "nodemon -w ./src --exec \"npm run build\" -e \"ts\"",
     "build": "tsc",
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepublishOnly": "npm run build"
@@ -15,7 +16,7 @@
     "@types/node": "^12.12.14",
     "@types/promptly": "^3.0.0",
     "@types/request": "^2.48.3",
-    "axios": "^0.19.0",
+    "axios": "^0.19.2",
     "commander": "^4.0.1",
     "fs-extra": "^8.1.0",
     "make-dir": "^3.0.0",

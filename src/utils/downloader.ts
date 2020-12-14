@@ -3,6 +3,19 @@ import reqCall from "request";
 import path from "path";
 import fss from "fs";
 
+import axios from "axios";
+ 
+
+// export const dl = (fileName: string, url: string, onProgress: (percent: number) => void) => {
+//     return axios.get(url, {
+        
+//     }).then(r => {
+//         const out = fss.createWriteStream(fileName);
+
+//         r.data.pipe(out);
+//     });
+// }
+
 export const downloadFile = (fileName: string, url: string, onProgress: (percent: number) => void) => {
     return new Promise(async (resolve, reject) => {
         // Save variable to know progress

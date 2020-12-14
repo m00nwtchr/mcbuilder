@@ -16,6 +16,10 @@ export class Manifest {
         this.gameVersion = gameVersion;
     }
 
+    getDeps(type?: DepType) {
+        return type ? this.dependencies.filter(el => el.getDepType() === type) : this.dependencies;
+    }
+
     addDep(dep: IFile) {
         let ls = this.dependencies.filter(el => el.equals(dep));
         if (ls.length > 0) {
@@ -27,20 +31,22 @@ export class Manifest {
     }
 
     toJSON(): any {
-        const dependencies = this.dependencies.filter(el => el.getDepType() == DepType.COMMON).map(el => el.toJSON());
-        const clientDependencies = this.dependencies.filter(el => el.getDepType() == DepType.CLIENT).map(el => el.toJSON());
-        const serverDependencies = this.dependencies.filter(el => el.getDepType() == DepType.SERVER).map(el => el.toJSON());
+        const dependencies = this.getDeps(DepType.COMMON).map(el => el.toJSON());
+        const clientDependencies = this.getDeps(DepType.CLIENT).map(el => el.toJSON());
+        const serverDependencies = this.getDeps(DepType.SERVER).map(el => el.toJSON());
 
 
-        return Object.assign({...this}, {
+        return Object.assign({ ...this }, {
             dependencies,
             clientDependencies,
             serverDependencies
         })
     }
 
-    static fromJSON(obj: any): Promise<Manifest> {
+    static fromJSON(str: string): Promise<Manifest> {
         return new Promise(async (resolve, reject) => {
+            const obj = JSON.parse(str);
+
             const deps: IFile[] = [...(obj.dependencies || []), ...(obj.clientDependencies || []), ...(obj.serverDependencies || [])];
             //delete obj.clientDependencies;
             //delete obj.serverDependencies;
@@ -50,16 +56,23 @@ export class Manifest {
             manifest.dependencies = [];
 
             await Promise.all(deps.map(async (el: any) => {
-                if (typeof el.projectId === 'number') {
-                    const file = await CFFile.fromJSON(manifest, el);
+                let file: IFile;
+
+                if (typeof el.projectId === 'number' && typeof el.fileId === 'number') {
+                    file = CFFile.fromJSON(manifest, el) as unknown as IFile;
+                }
+
+                if (file) {
+                    const fa = file as any;
                     if (obj.clientDependencies && obj.clientDependencies.includes(el)) {
-                        file.depType = DepType.CLIENT;
+                        fa.depType = DepType.CLIENT;
                     }
                     if (obj.serverDependencies && obj.serverDependencies.includes(el)) {
-                        file.depType = DepType.SERVER;
+                        fa.depType = DepType.SERVER;
                     }
-                    return file;
                 }
+
+                return file;
             })).then(d => {
                 d.forEach(el => manifest.addDep(el));
                 resolve(manifest);

@@ -8,7 +8,7 @@ export interface FileInfo {
     downloadUrl: string;
     isAlternate: boolean;
     alternateFileId: number;
-    dependencies: [];
+    dependencies: {addonId:number, type:number}[];
     isAvailable: boolean;
     gameVersion: string[];
 }

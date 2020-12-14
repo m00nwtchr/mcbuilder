@@ -89,8 +89,7 @@ export const getSearch = (
         isSortDescending,
         index,
         searchFilter,
-        gameVersion:
-            gameVersion !== undefined && gameVersion !== null ? gameVersion : ''
+        gameVersion: gameVersion || ''
     };
     return makeRequest(url, params);
 };
