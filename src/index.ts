@@ -124,7 +124,9 @@ program
         console.log(manifestFinal)
 
         if (await promptly.confirm("Is this correct?")) {
-            fs.writeFileSync(manifestPath, manifestFinal)
+            fs.writeFileSync(manifestPath, manifestFinal);
+
+            saveLastPath();
         }
     });
 program
@@ -378,9 +380,69 @@ program
         cleanup();
     })
 
+const mcLauncherTmpPath = path.join(os.tmpdir(), "mcbuilder-mc-launcher-tmp");
+
+const wait = (ms: number) => {
+    return new Promise((resolve, reject) => {
+        try {
+            setTimeout(() => {
+                return resolve();
+            }, ms);
+        } catch(e) {
+            return reject(e);
+        }
+    });
+}
+
 program
     .command("run")
-    .action((options) => {
+    .action(async (options) => {
+        fs.ensureDirSync(mcLauncherTmpPath);
+
+        const launcherProfilesJsonPath = path.join(mcLauncherTmpPath, "launcher_profiles.json")
+
+        if (!fs.existsSync(launcherProfilesJsonPath)) {
+            let mcProc;
+            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcLauncherTmpPath]);
+        
+            await wait(3000);
+
+            mcProc.kill();
+        }
+
+        const forgeVersionName = `${manifest.gameVersion}-forge-${manifest.forgeVersion}`;
+
+        if (!fs.existsSync(path.join(mcLauncherTmpPath, "versions", forgeVersionName))) {
+            const forgeInstllerName = `forge-${manifest.gameVersion}-${manifest.forgeVersion}-installer.jar`;
+            const forgeInstallerPath = path.join(mcLauncherTmpPath, forgeInstllerName);
+
+            const forgeInstallerURL = `http://files.minecraftforge.net/maven/net/minecraftforge/forge/${manifest.gameVersion}-${manifest.forgeVersion}/${forgeInstllerName}`
+
+            if (!fs.existsSync(forgeInstallerURL))
+                await downloadFile(forgeInstallerPath, forgeInstallerURL, percent => {
+                    console.log(`Downloading ${forgeInstllerName}. ${percent}% Done`);
+                });
+
+            console.log(`Install forge client to "${mcLauncherTmpPath}"`);
+
+            child_process.spawnSync('java', ['-jar', forgeInstallerPath]);
+        }
+
+        const launcherProfiles = JSON.parse(fs.readFileSync(launcherProfilesJsonPath).toString("utf8"));
+
+        launcherProfiles.profiles['mcbuilder'] = {
+            name: manifest.name,
+            type: 'custom',
+            lastVersionId: forgeVersionName,
+            gameDir: path.resolve("run")
+        };
+
+        fs.writeFileSync(launcherProfilesJsonPath, JSON.stringify(launcherProfiles, null, 2))
+
+        {
+            let mcProc;
+            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcLauncherTmpPath]);
+        }
 
         cleanup();
     })
@@ -399,6 +461,11 @@ function cleanExit(code: number, err?: Error) {
 function cleanup() {
     if (lockfile.checkSync("repo.lock"))
         lockfile.unlockSync("pack.lock");
+}
+
+function saveLastPath() {
+    if (process.getuid() !== 0)
+        fs.writeFileSync(tmpFilePath, process.cwd())
 }
 
 program.exitOverride(err => cleanExit(1, err))
@@ -420,8 +487,7 @@ lockfile.lock("pack.lock", { wait: Number.MAX_VALUE }, (err) => {
         fs.ensureSymlinkSync("mods", path.join("run", "mods"));
         fs.ensureSymlinkSync("config", path.join("run", "config"));
 
-        if (process.getuid() !== 0)
-            fs.writeFileSync(tmpFilePath, process.cwd())
+        saveLastPath();
 
         program.parse(process.argv);
         checkFS();
