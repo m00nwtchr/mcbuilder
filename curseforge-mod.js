@@ -1,7 +1,7 @@
 // ==UserScript==
 // @name         CurseForge Mod
 // @namespace    https://github.com/lmarianski/mcbuilder
-// @download     
+// @downloadURL  https://raw.githubusercontent.com/lmarianski/mcbuilder/master/curseforge-mod.js
 // @version      0.1
 // @description  Replace indirect "Install" (https://www.curseforge.com/<game>/<category/<slug>/download?client=y) links with direct ones (curseforge://install?addonId=<id>)
 // @author       lmarianski
