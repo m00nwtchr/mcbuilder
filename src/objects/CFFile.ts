@@ -1,8 +1,11 @@
-import { IFile, DepType } from "./IFile";
+import { FileDepType, IFile, PackDepType } from "./IFile";
 import { CFProjectInfo } from "./CFProjectInfo";
 import { FileInfo } from "./FileInfo";
 import * as curse from "../utils/cursemeta";
 import { Manifest } from "./Manifest";
+
+const FILE_REQUIRED = 3;
+const FILE_OPTIONAL = 2;
 
 export class CFFile implements IFile {
 	projectId: number;
@@ -13,7 +16,7 @@ export class CFFile implements IFile {
 
 	fileName: string;
 
-	depType: DepType = DepType.COMMON;
+	depType: PackDepType = PackDepType.COMMON;
 
 	manifest: Manifest;
 
@@ -96,8 +99,14 @@ export class CFFile implements IFile {
 		return this.depType;
 	}
 
-	getDependencies() {
-		return Promise.resolve(this.info.dependencies.map(obj => new CFFile(this.manifest, obj.addonId)));
+	getDependencies(depType: FileDepType = FileDepType.ALL) {
+		let res = this.info.dependencies;
+
+		if (depType != FileDepType.ALL) {
+			res = res.filter(obj => depType === FileDepType.REQUIRED ? obj.type === FILE_REQUIRED : obj.type === FILE_OPTIONAL);
+		}
+			
+		return Promise.resolve(res.map(obj => new CFFile(this.manifest, obj.addonId)));
 	}
 
 	equals(other: IFile): boolean {

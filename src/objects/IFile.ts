@@ -5,11 +5,21 @@ export interface IFile {
     getFileName(): string;
     canUpdate(): boolean;
     getUpdateRef(): Promise<IFile>;
-    getDepType(): DepType;
-    getDependencies(): Promise<IFile[]>;
+    getDepType(): PackDepType;
+    getDependencies(depType: FileDepType): Promise<IFile[]>;
     equals(other: IFile): boolean;
 }
 
-export enum DepType {
+export enum PackDepType {
     COMMON, CLIENT, SERVER
+}
+
+export enum FileDepType {
+    ALL,
+    // EMBEDDED = 1,
+    OPTIONAL,// = 2,
+    REQUIRED//= 3,
+    // TOOL = 4,
+    // INCOMPATIBLE = 5,
+    // INCLUDE = 6,
 }

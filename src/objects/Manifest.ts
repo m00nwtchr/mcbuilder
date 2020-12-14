@@ -1,4 +1,4 @@
-import { IFile, DepType } from "./IFile";
+import { IFile, PackDepType } from "./IFile";
 import { CFFile } from "./CFFile";
 export class Manifest {
     name: string;
@@ -16,7 +16,7 @@ export class Manifest {
         this.gameVersion = gameVersion;
     }
 
-    getDeps(type?: DepType) {
+    getDeps(type?: PackDepType) {
         return type ? this.dependencies.filter(el => el.getDepType() === type) : this.dependencies;
     }
 
@@ -31,9 +31,9 @@ export class Manifest {
     }
 
     toJSON(): any {
-        const dependencies = this.getDeps(DepType.COMMON).map(el => el.toJSON());
-        const clientDependencies = this.getDeps(DepType.CLIENT).map(el => el.toJSON());
-        const serverDependencies = this.getDeps(DepType.SERVER).map(el => el.toJSON());
+        const dependencies = this.getDeps(PackDepType.COMMON).map(el => el.toJSON());
+        const clientDependencies = this.getDeps(PackDepType.CLIENT).map(el => el.toJSON());
+        const serverDependencies = this.getDeps(PackDepType.SERVER).map(el => el.toJSON());
 
 
         return Object.assign({ ...this }, {
@@ -59,16 +59,16 @@ export class Manifest {
                 let file: IFile;
 
                 if (typeof el.projectId === 'number' && typeof el.fileId === 'number') {
-                    file = CFFile.fromJSON(manifest, el) as unknown as IFile;
+                    file = CFFile.fromJSON(manifest, el);
                 }
 
                 if (file) {
                     const fa = file as any;
                     if (obj.clientDependencies && obj.clientDependencies.includes(el)) {
-                        fa.depType = DepType.CLIENT;
+                        fa.depType = PackDepType.CLIENT;
                     }
                     if (obj.serverDependencies && obj.serverDependencies.includes(el)) {
-                        fa.depType = DepType.SERVER;
+                        fa.depType = PackDepType.SERVER;
                     }
                 }
 

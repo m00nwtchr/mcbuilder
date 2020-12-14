@@ -3,8 +3,9 @@ import fs from "fs-extra";
 import path from "path";
 import child_process from "child_process";
 import os, { userInfo } from "os";
-import {parse as urlParse, UrlWithParsedQuery} from "url";
+import { parse as urlParse, UrlWithParsedQuery } from "url";
 
+import lockfile, { lock } from "lockfile";
 import sevenBin from "7zip-bin";
 import Zip from "node-7z";
 import axios from "axios";
@@ -16,7 +17,7 @@ import * as curse from "./utils/cursemeta";
 import { downloadFile } from "./utils/downloader";
 import { Manifest } from "./objects/Manifest";
 import { CFFile } from "./objects/CFFile";
-import { IFile, DepType } from "./objects/IFile";
+import { FileDepType, IFile, PackDepType } from "./objects/IFile";
 
 const tmpFilePath = path.join(os.tmpdir(), 'last-mcbuilder-path');
 
@@ -55,7 +56,7 @@ function loadManifest() {
 
                 if (fs.existsSync(p)) {
                     process.chdir(p);
-                    loadManifest().then(man => resolve(man)).catch(err=>reject(err));
+                    loadManifest().then(man => resolve(man)).catch(err => reject(err));
                     return;
                 }
             }
@@ -142,15 +143,13 @@ program
 
         saveManifest();
 
-        if (!fs.existsSync("mods")) fs.mkdirSync("mods");
-
         const p = path.join("mods", ref.getFileName());
 
         if (fs.existsSync(p))
             fs.unlinkSync(p);
     });
 
-const add = async (ref: IFile, depType: DepType, all?: IFile[]): Promise<IFile[]> => {
+const add = async (ref: IFile, depType: PackDepType, all?: IFile[]): Promise<IFile[]> => {
     all = all || [];
 
     if (!manifest) process.exit(0);
@@ -165,7 +164,7 @@ const add = async (ref: IFile, depType: DepType, all?: IFile[]): Promise<IFile[]
 
         const promises: Promise<IFile[]>[] = [];
 
-        (await ref.getDependencies()).forEach(dep => {
+        (await ref.getDependencies(FileDepType.REQUIRED)).forEach(dep => {
             promises.push(add(dep, depType, all));
         });
 
@@ -183,10 +182,10 @@ const parseUrl = (str: string, opts?: any): IFile => {
 
     try {
         url = urlParse(str, true);
-    } catch (e) {}
+    } catch (e) { }
 
-    switch((url && url.protocol) || '') {
-        case("curseforge:"):
+    switch ((url && url.protocol) || '') {
+        case ("curseforge:"):
             if (url.host === "install") {
                 const addonId = parseInt(url.query['addonId'] as string);
                 const fileId = parseInt(url.query['fileId'] as string);
@@ -200,7 +199,7 @@ const parseUrl = (str: string, opts?: any): IFile => {
                 const addonId = parseInt(str);
 
                 return new CFFile(manifest, addonId);
-            } catch(e){
+            } catch (e) {
                 throw new Error(`Not a supported mod source URL: ${str}`)
             }
             break;
@@ -214,34 +213,31 @@ program
     .option("-C, --client", "If specified, the file will be added as a client-only dependency.")
     .option("-S, --server", "If specified, the file will be added as a server-only dependency.")
     .action(async (url: string, options) => {
-        const ref = parseUrl(url, {urlFile: options.urlFile});
+        const ref = parseUrl(url, { urlFile: options.urlFile });
 
         if (ref instanceof CFFile) {
             ref.fileId = options.file ? parseInt(options.file) : undefined;
         }
 
-        const all = await add(ref, options.client ? DepType.CLIENT : options.server ? DepType.SERVER : DepType.COMMON);
+        const all = await add(ref, options.client ? PackDepType.CLIENT : options.server ? PackDepType.SERVER : PackDepType.COMMON);
 
-        all.forEach(async ref => {
-
-            downloadFile(path.join("mods", ref.getFileName()), await ref.getDownloadUrl(), percent => {
+        await Promise.all(all.map(async ref => {
+            return await downloadFile(path.join("mods", ref.getFileName()), await ref.getDownloadUrl(), percent => {
                 console.log(`Downloading ${ref.getFileName()}. ${percent}% Done`);
             });
-        })
+        }));
+
+        cleanup();
     });
 
 program
     .command("install")
     .option("-U, --update", "If specified, the program will look for updates for all the mods it knows sources of.")
     .action(async (options) => {
-        if (!fs.existsSync("mods")) fs.mkdirSync("mods");
-
         const updated: IFile[] = [];
 
-        const promises: Promise<void>[] = [];
-
-        manifest.dependencies.forEach(el => {
-            promises.push(new Promise(async (resolve, reject) => {
+        await Promise.all(manifest.dependencies.map(el => {
+            return new Promise(async (resolve, reject) => {
                 let p = path.join("mods", el.getFileName());
 
                 if (options.update) {
@@ -258,29 +254,20 @@ program
 
                 if (!fs.existsSync(p)) {
                     await el.fetch();
-                    downloadFile(p, await el.getDownloadUrl(), percent => {
+                    await downloadFile(p, await el.getDownloadUrl(), percent => {
                         console.log(`Downloading ${el.getFileName()}. ${percent}% Done`);
-                        resolve();
                     });
+                    return resolve();
                 }
-            }));
-        });
-
-        // promises.map(p=>p.catch(e=>{}))
-
-
-        // try {
-        await Promise.all(promises);
-        // } catch(e) {
-        // console.error(e);
-        // return;
-        // }
+            });
+        }));
 
         updated.forEach(el => {
             manifest.addDep(el);
         });
 
         //console.dir((manifest.dependencies[0] as CFRef).projectInfo.gameVersionLatestFiles)
+        cleanup();
     });
 program
     .command("build")
@@ -341,6 +328,8 @@ program
             case ("raw"):
                 break;
         }
+
+        cleanup();
     })
 program
     .command("register")
@@ -383,33 +372,65 @@ program
 
                 break;
         }
+
+        cleanup();
     })
 
 program
     .command("run")
     .action((options) => {
 
+        cleanup();
     })
 
 if (process.argv.length <= 2) {
     process.argv.push("--help");
 }
 
+function cleanExit(code: number, err?: Error) {
+    cleanup();
+
+    // console.error(err);
+    process.exit(code);
+}
+
+function cleanup() {
+    if (lockfile.checkSync("repo.lock")) 
+        lockfile.unlockSync("pack.lock");
+}
+
+program.exitOverride(err => cleanExit(1, err))
+
 loadManifest().then(() => {
-    fs.ensureDirSync("mods");
-    fs.ensureDirSync("config");
-    fs.ensureDirSync("run");
+    
+    if (lockfile.checkSync("pack.lock")) {
+        console.log("Waiting for other mcbuilder process to quit... Delete pack.lock if you're sure this is an error")
+    }
 
-    fs.ensureSymlinkSync("mods", path.join("run", "mods"));
-    fs.ensureSymlinkSync("config", path.join("run", "config"));
+    lockfile.lock("pack.lock", {wait:Number.MAX_VALUE},(err) => {
+        if (err) {
+            console.error(err);
+            process.exit(1);
+        }
 
-    fs.writeFileSync(tmpFilePath, process.cwd())
+        fs.ensureDirSync("mods");
+        fs.ensureDirSync("config");
+        fs.ensureDirSync("run");
 
+        fs.ensureSymlinkSync("mods", path.join("run", "mods"));
+        fs.ensureSymlinkSync("config", path.join("run", "config"));
+
+        if (process.getuid() !== 0)
+            fs.writeFileSync(tmpFilePath, process.cwd())
+
+        program.parse(process.argv);
+        // checkFS();
+        // saveManifest();
+
+        // cleanup();
+    });
+}).catch((err) => {
+    // console.error("Manifest not found.");
+    // if (err) console.debug(err);
     program.parse(process.argv);
-    // checkFS();
-    // saveManifest();
-}).catch((e) => {
-    console.error("Manifest not found.");
-    console.debug(e);
-    program.parse(process.argv)
 })
