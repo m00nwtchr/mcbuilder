@@ -31,6 +31,8 @@ export class Manifest {
     }
 
     toJSON(): any {
+        this.dependencies.sort((a,b) => a.getFileName().localeCompare(b.getFileName()))
+
         const dependencies = this.getDeps(PackDepType.COMMON).map(el => el.toJSON());
         const clientDependencies = this.getDeps(PackDepType.CLIENT).map(el => el.toJSON());
         const serverDependencies = this.getDeps(PackDepType.SERVER).map(el => el.toJSON());

@@ -23,16 +23,28 @@ const tmpFilePath = path.join(os.tmpdir(), 'last-mcbuilder-path');
 
 const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json")).toString("utf8"));
 
-function findManifest(directory?: string) {
+function findManifest(directory?: string): string {
     if (directory === undefined) {
         directory = "."
     }
 
-    return path.resolve(directory, "manifest.json");
+    const p = path.resolve(directory, "manifest.json");
+
+    if (fs.existsSync(p)) {
+        return p;
+    } else if (fs.existsSync(tmpFilePath)) {
+        const pa = fs.readFileSync(tmpFilePath).toString("utf8");
+        if (fs.existsSync(path.join(pa, "manifest.json"))) {
+            process.chdir(pa);
+            return findManifest();
+        }
+    } else {
+        return null;
+    }
 }
 
 let manifest: Manifest;
-let manifestPath: string;
+const manifestPath = findManifest();
 
 function saveManifest() {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest.toJSON(), null, "\t"))
@@ -41,8 +53,6 @@ function saveManifest() {
 function loadManifest() {
     return new Promise(async (resolve, reject) => {
         try {
-            manifestPath = findManifest();
-
             if (fs.existsSync(manifestPath)) {
                 const str = fs.readFileSync(manifestPath).toString("utf8");
 
@@ -51,14 +61,6 @@ function loadManifest() {
                 //console.log(manifest)
 
                 return resolve(manifest)
-            } else if (fs.existsSync(tmpFilePath)) {
-                const p = fs.readFileSync(tmpFilePath).toString("utf8");
-
-                if (fs.existsSync(p)) {
-                    process.chdir(p);
-                    loadManifest().then(man => resolve(man)).catch(err => reject(err));
-                    return;
-                }
             }
             return reject();
         } catch (e) {
@@ -395,24 +397,22 @@ function cleanExit(code: number, err?: Error) {
 }
 
 function cleanup() {
-    if (lockfile.checkSync("repo.lock")) 
+    if (lockfile.checkSync("repo.lock"))
         lockfile.unlockSync("pack.lock");
 }
 
 program.exitOverride(err => cleanExit(1, err))
 
-loadManifest().then(() => {
-    
-    if (lockfile.checkSync("pack.lock")) {
-        console.log("Waiting for other mcbuilder process to quit... Delete pack.lock if you're sure this is an error")
+if (lockfile.checkSync("pack.lock")) {
+    console.log("Waiting for other mcbuilder process to quit... Delete pack.lock if you're sure this is an error")
+}
+lockfile.lock("pack.lock", { wait: Number.MAX_VALUE }, (err) => {
+    if (err) {
+        console.error(err);
+        process.exit(1);
     }
 
-    lockfile.lock("pack.lock", {wait:Number.MAX_VALUE},(err) => {
-        if (err) {
-            console.error(err);
-            process.exit(1);
-        }
-
+    loadManifest().then(() => {
         fs.ensureDirSync("mods");
         fs.ensureDirSync("config");
         fs.ensureDirSync("run");
@@ -424,13 +424,13 @@ loadManifest().then(() => {
             fs.writeFileSync(tmpFilePath, process.cwd())
 
         program.parse(process.argv);
-        // checkFS();
-        // saveManifest();
+        checkFS();
+        saveManifest();
 
         // cleanup();
+    }).catch((err) => {
+        // console.error("Manifest not found.");
+        // if (err) console.debug(err);
+        program.parse(process.argv);
     });
-}).catch((err) => {
-    // console.error("Manifest not found.");
-    // if (err) console.debug(err);
-    program.parse(process.argv);
-})
+});
