@@ -10,18 +10,20 @@ Command line modpack builder for Minecraft!
 $ mcbuilder --help
 Usage: mcbuilder [options] [command]
 
+Command line modpack builder for Minecraft!
+
 Options:
   -V, --version        output the version number
   -h, --help           output usage information
 
 Commands:
-  init
-  remove <url>
-  add [options] <url>
-  install [options]
-  build [options]
-  register [options]
-  run [options]
+  init                 Initalize a new pack repository
+  remove <url>         Remove a mod, url can be a curseforge project id
+  add [options] <url>  Adds a mod, url can be a CF project id or a curseforge:// url
+  install [options]    Downloads all the mods described in the manifest
+  build [options]      Builds a pack in one of the popular pack formats (e.g Curse)
+  register [options]   Registers a URL handler for curseforge:// urls, for integration with the website, needs admin permissions (LINUX ONLY ATM)
+  run [options]        Launches the pack in the minecraft launcher
 ```
 
 ## Other
