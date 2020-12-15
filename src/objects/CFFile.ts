@@ -109,8 +109,12 @@ export class CFFile implements IFile {
 		return Promise.resolve(res.map(obj => new CFFile(this.manifest, obj.addonId)));
 	}
 
+	// equals(other: IFile): boolean {
+	// 	return other instanceof CFFile && this.projectId === other.projectId && this.fileId === other.fileId;
+	// }
+
 	equals(other: IFile): boolean {
-		return other instanceof CFFile && this.projectId === other.projectId && this.fileId === other.fileId;
+		return other instanceof CFFile && this.projectId === other.projectId;
 	}
 
 	async getUpdateRef() {

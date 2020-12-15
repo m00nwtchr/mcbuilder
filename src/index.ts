@@ -226,13 +226,22 @@ program
         const all = await add(ref, options.client ? PackDepType.CLIENT : options.server ? PackDepType.SERVER : PackDepType.COMMON);
 
         await Promise.all(all.map(async ref => {
-            return await downloadFile(path.join("mods", ref.getFileName()), await ref.getDownloadUrl(), percent => {
-                console.log(`Downloading ${ref.getFileName()}. ${percent}% Done`);
-            });
+            return await install(ref);
         }));
 
         cleanup();
     });
+
+const install = async (ref: IFile) => {
+    const filePath = path.join("mods", ref.getFileName())
+
+    if (!fs.existsSync(filePath)) {
+        await ref.fetch();
+        await downloadFile(filePath, await ref.getDownloadUrl(), percent => {
+            console.log(`Downloading ${ref.getFileName()}. ${percent}% Done`);
+        });
+    }
+}
 
 program
     .command("install")
@@ -256,13 +265,9 @@ program
                     }
                 }
 
-                if (!fs.existsSync(p)) {
-                    await el.fetch();
-                    await downloadFile(p, await el.getDownloadUrl(), percent => {
-                        console.log(`Downloading ${el.getFileName()}. ${percent}% Done`);
-                    });
-                    return resolve();
-                }
+                install(el);
+
+                return resolve();
             });
         }));
 
@@ -316,7 +321,19 @@ program
 
                 fs.writeFileSync(path.join("build", "manifest.json"), JSON.stringify(cfManifest, null, "\t"));
 
-                if (fs.existsSync("overrides")) fs.copySync("overrides", path.join("build", "overrides"), { recursive: true });
+                const overridesPath = path.join("build", "overrides");
+                const overridesMods = path.join(overridesPath, "mods");
+
+                fs.ensureDirSync(overridesPath);
+                
+                manifest.dependencies.forEach(val => {
+                    if (!(val instanceof CFFile)) {
+                        fs.ensureDirSync(overridesMods);
+                        fs.copyFileSync(path.join("mods", val.getFileName()), path.join(overridesMods, val.getFileName()));
+                    }
+                })
+
+                fs.copySync("overrides", overridesPath, { recursive: true });
 
                 process.chdir("build");
                 const z = (Zip as any).add(path.join("..", "out", `${manifest.name}.zip`), path.join("**"), {
@@ -380,8 +397,6 @@ program
         cleanup();
     })
 
-const mcLauncherTmpPath = path.join(os.tmpdir(), "mcbuilder-mc-launcher-tmp");
-
 const wait = (ms: number) => {
     return new Promise((resolve, reject) => {
         try {
@@ -394,16 +409,21 @@ const wait = (ms: number) => {
     });
 }
 
+const mcLauncherTmpPath = path.join(os.tmpdir(), "mcbuilder-mc-launcher-tmp");
+
 program
     .command("run")
+    .option("-w, --workDir <dir>", "Work dir for the mc launcher, a temporary directory is used otherwise")
     .action(async (options) => {
-        fs.ensureDirSync(mcLauncherTmpPath);
+        const mcWorkDir = options.workDir || mcLauncherTmpPath;
 
-        const launcherProfilesJsonPath = path.join(mcLauncherTmpPath, "launcher_profiles.json")
+        fs.ensureDirSync(mcWorkDir);
+
+        const launcherProfilesJsonPath = path.join(mcWorkDir, "launcher_profiles.json")
 
         if (!fs.existsSync(launcherProfilesJsonPath)) {
             let mcProc;
-            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcLauncherTmpPath]);
+            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcWorkDir]);
         
             await wait(3000);
 
@@ -412,9 +432,9 @@ program
 
         const forgeVersionName = `${manifest.gameVersion}-forge-${manifest.forgeVersion}`;
 
-        if (!fs.existsSync(path.join(mcLauncherTmpPath, "versions", forgeVersionName))) {
+        if (!fs.existsSync(path.join(mcWorkDir, "versions", forgeVersionName))) {
             const forgeInstllerName = `forge-${manifest.gameVersion}-${manifest.forgeVersion}-installer.jar`;
-            const forgeInstallerPath = path.join(mcLauncherTmpPath, forgeInstllerName);
+            const forgeInstallerPath = path.join(mcWorkDir, forgeInstllerName);
 
             const forgeInstallerURL = `http://files.minecraftforge.net/maven/net/minecraftforge/forge/${manifest.gameVersion}-${manifest.forgeVersion}/${forgeInstllerName}`
 
@@ -423,7 +443,7 @@ program
                     console.log(`Downloading ${forgeInstllerName}. ${percent}% Done`);
                 });
 
-            console.log(`Install forge client to "${mcLauncherTmpPath}"`);
+            console.log(`Install forge client to "${mcWorkDir}"`);
 
             child_process.spawnSync('java', ['-jar', forgeInstallerPath]);
         }
@@ -441,15 +461,11 @@ program
 
         {
             let mcProc;
-            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcLauncherTmpPath]);
+            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcWorkDir]);
         }
 
         cleanup();
     })
-
-if (process.argv.length <= 2) {
-    process.argv.push("--help");
-}
 
 function cleanExit(code: number, err?: Error) {
     cleanup();
@@ -470,6 +486,10 @@ function saveLastPath() {
 
 program.exitOverride(err => cleanExit(1, err))
 
+if (process.argv.length <= 2) {
+    process.argv.push("--help");
+}
+
 if (lockfile.checkSync("pack.lock")) {
     console.log("Waiting for other mcbuilder process to quit... Delete pack.lock if you're sure this is an error")
 }
@@ -481,16 +501,18 @@ lockfile.lock("pack.lock", { wait: Number.MAX_VALUE }, (err) => {
 
     loadManifest().then(() => {
         fs.ensureDirSync("mods");
-        fs.ensureDirSync("config");
         fs.ensureDirSync("run");
-
         fs.ensureSymlinkSync("mods", path.join("run", "mods"));
-        fs.ensureSymlinkSync("config", path.join("run", "config"));
+
+        fs.ensureDirSync("overrides");
+        fs.ensureDirSync(path.join("overrides", "config"))
+        fs.ensureSymlinkSync(path.join("overrides", "config"), path.join("run", "config"));
+
 
         saveLastPath();
 
         program.parse(process.argv);
-        checkFS();
+        // checkFS();
         saveManifest();
 
         // cleanup();

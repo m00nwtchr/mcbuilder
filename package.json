@@ -1,6 +1,6 @@
 {
   "name": "mcbuilder",
-  "version": "1.0.5",
+  "version": "1.1.0",
   "description": "Command line modpack builder for Minecraft!",
   "main": "src/index.ts",
   "scripts": {
@@ -9,30 +9,28 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepublishOnly": "npm run build"
   },
-  "author": "lukas2005",
+  "author": "m00n",
   "license": "GPL-3.0",
   "dependencies": {
     "7zip-bin": "^5.0.3",
+    "@types/fs-extra": "^8.1.1",
     "@types/lockfile": "^1.0.1",
-    "@types/node": "^12.12.14",
+    "@types/node": "^12.19.9",
     "@types/promptly": "^3.0.0",
-    "@types/request": "^2.48.3",
+    "@types/request": "^2.48.5",
     "axios": "^0.19.2",
-    "commander": "^4.0.1",
+    "commander": "^4.1.1",
     "fs-extra": "^8.1.0",
     "lockfile": "^1.0.4",
-    "make-dir": "^3.0.0",
-    "node-7z": "^2.0.4",
-    "prompt": "^1.0.0",
-    "promptly": "^3.0.3",
-    "request": "^2.88.0"
+    "node-7z": "^2.1.2",
+    "promptly": "^3.2.0",
+    "request": "^2.88.2"
   },
   "bin": {
     "mcbuilder": "./dist/index.js"
   },
   "devDependencies": {
-    "@types/fs-extra": "^8.0.1",
-    "typescript": "^3.7.3"
+    "typescript": "^3.9.7"
   },
   "repository": {
     "type": "git",

@@ -1,9 +1,8 @@
-import makeDir from "make-dir";
 import reqCall from "request";
 import path from "path";
-import fss from "fs";
+import fs from "fs-extra";
 
-import axios from "axios";
+// import axios from "axios";
 
 
 // export const dl = (fileName: string, url: string, onProgress: (percent: number) => void) => {
@@ -17,7 +16,7 @@ import axios from "axios";
 // }
 
 export const downloadFile = (fileName: string, url: string, onProgress?: (percent: number) => void) => {
-	return new Promise(async (resolve, reject) => {
+	return new Promise((resolve, reject) => {
 		// Save variable to know progress
 		let received_bytes = 0;
 		let total_bytes = 0;
@@ -27,8 +26,9 @@ export const downloadFile = (fileName: string, url: string, onProgress?: (percen
 			uri: url
 		});
 
-		await makeDir(path.dirname(fileName));
-		const out = fss.createWriteStream(fileName);
+		fs.mkdirSync(path.dirname(fileName), {recursive:true})
+
+		const out = fs.createWriteStream(fileName);
 		req.pipe(out);
 		
 		if (onProgress) {
