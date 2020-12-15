@@ -9,7 +9,7 @@
     "test": "echo \"Error: no test specified\" && exit 1",
     "prepublishOnly": "npm run build"
   },
-  "author": "m00n",
+  "author": "lmarianski",
   "license": "GPL-3.0",
   "dependencies": {
     "7zip-bin": "^5.0.3",
@@ -34,10 +34,10 @@
   },
   "repository": {
     "type": "git",
-    "url": "git+https://github.com/lukas2005/mcbuilder.git"
+    "url": "git+https://github.com/lmarianski/mcbuilder.git"
   },
   "bugs": {
-    "url": "https://github.com/lukas2005/mcbuilder/issues"
+    "url": "https://github.com/lmarianski/mcbuilder/issues"
   },
-  "homepage": "https://github.com/lukas2005/mcbuilder#readme"
+  "homepage": "https://github.com/lmarianski/mcbuilder#readme"
 }
