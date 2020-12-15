@@ -30,6 +30,7 @@
     "mcbuilder": "./dist/index.js"
   },
   "devDependencies": {
+    "nodemon": "^2.0.6",
     "typescript": "^3.9.7"
   },
   "repository": {
