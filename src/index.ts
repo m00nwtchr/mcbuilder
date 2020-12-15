@@ -87,12 +87,22 @@ function checkFS() {
 
 program
     .name(packageInfo.name)
+    .description(packageInfo.description)
     .version(packageInfo.version);
+
+const gitignore = `mods
+
+run
+out
+.lock
+
+*.jar`;
 
 program
     .command("init")
+    .description("Initalize a new pack repository")
     .action(async () => {
-        const pa = path.parse(path.parse(manifestPath).dir);
+        const pa = path.parse(path.dirname(manifestPath));
 
         manifest = Object.assign(new Manifest(pa.name, "1.16.4", "", ""), manifest);
 
@@ -126,28 +136,53 @@ program
         if (await promptly.confirm("Is this correct?")) {
             fs.writeFileSync(manifestPath, manifestFinal);
 
+            if (!fs.existsSync('.gitignore'))
+                fs.writeFileSync('.gitignore', gitignore);
+
             saveLastPath();
         }
     });
+
+const parseUrl = (str: string, opts?: any): IFile => {
+    let url: UrlWithParsedQuery;
+
+    try {
+        url = urlParse(str, true);
+    } catch (e) { }
+
+    switch ((url && url.protocol) || '') {
+        case ("curseforge:"):
+            if (url.host === "install") {
+                const addonId = parseInt(url.query['addonId'] as string);
+                const fileId = parseInt(url.query['fileId'] as string);
+
+                return new CFFile(manifest, addonId, opts.urlFile ? fileId : undefined);
+            } else {
+                process.exit(0);
+            }
+        default:
+            try {
+                const addonId = parseInt(str);
+
+                return new CFFile(manifest, addonId);
+            } catch (e) {
+                throw new Error(`Not a supported mod source URL: ${str}`)
+            }
+            break;
+    }
+}
+
 program
     .command("remove <url>")
+    .description("Remove a mod, url can be a curseforge project id")
     .action(async (url: string) => {
 
-        let ref: IFile = null;
-        const ne: IFile[] = [];
-        //console.log(url)
-        manifest.dependencies.forEach(el => {
-            if (el instanceof CFFile && el.projectId === parseInt(url)) {
-                ref = el;
-            } else {
-                ne.push(el);
-            }
-        });
-        manifest.dependencies = ne;
+        const removeRef: IFile = parseUrl(url);
 
+        manifest.dependencies = manifest.dependencies.filter(el => !el.equals(removeRef));
         saveManifest();
 
-        const p = path.join("mods", ref.getFileName());
+        const p = path.join("mods", removeRef.getFileName());
 
         if (fs.existsSync(p))
             fs.unlinkSync(p);
@@ -181,37 +216,9 @@ const add = async (ref: IFile, depType: PackDepType, all?: IFile[]): Promise<IFi
     return all;
 }
 
-const parseUrl = (str: string, opts?: any): IFile => {
-    let url: UrlWithParsedQuery;
-
-    try {
-        url = urlParse(str, true);
-    } catch (e) { }
-
-    switch ((url && url.protocol) || '') {
-        case ("curseforge:"):
-            if (url.host === "install") {
-                const addonId = parseInt(url.query['addonId'] as string);
-                const fileId = parseInt(url.query['fileId'] as string);
-
-                return new CFFile(manifest, addonId, opts.urlFile ? fileId : undefined);
-            } else {
-                process.exit(0);
-            }
-        default:
-            try {
-                const addonId = parseInt(str);
-
-                return new CFFile(manifest, addonId);
-            } catch (e) {
-                throw new Error(`Not a supported mod source URL: ${str}`)
-            }
-            break;
-    }
-}
-
 program
     .command("add <url>")
+    .description("Adds a mod, url can be a CF project id or a curseforge:// url")
     .option("-f, --file <fileId>", "If adding by CurseForge project id, use this to specify the file, otherwise latest for current game version is used")
     .option("--urlFile", "If used to handle an url, this tells the program to extract the file id from the url rather than try to look for it itself (NOT RECCOMENDED")
     .option("-C, --client", "If specified, the file will be added as a client-only dependency.")
@@ -245,6 +252,7 @@ const install = async (ref: IFile) => {
 
 program
     .command("install")
+    .description("Downloads all the mods described in the manifest")
     .option("-U, --update", "If specified, the program will look for updates for all the mods it knows sources of.")
     .action(async (options) => {
         const updated: IFile[] = [];
@@ -280,10 +288,10 @@ program
     });
 program
     .command("build")
+    .description("Builds a pack in one of the popular pack formats (e.g Curse)")
     .option("-f, --format [format]", `select the export format, default is CurseForge (Twitch) format
     Formats:
-    cf  - CurseForge (Twitch)
-    raw - Raw minecraft profile`, "cf")
+    cf  - CurseForge`, "cf")
     .action((options) => {
         switch (options.format) {
             case ("cf"):
@@ -325,7 +333,7 @@ program
                 const overridesMods = path.join(overridesPath, "mods");
 
                 fs.ensureDirSync(overridesPath);
-                
+
                 manifest.dependencies.forEach(val => {
                     if (!(val instanceof CFFile)) {
                         fs.ensureDirSync(overridesMods);
@@ -354,6 +362,7 @@ program
     })
 program
     .command("register")
+    .description("Registers a URL handler for curseforge:// urls, for integration with the website, needs admin permissions (LINUX ONLY ATM)")
     .option("--urlFile", "When the handler tries to add a mod, the --urlFile option is passed to mcbuilder add (NOT RECOMMENDED, if you use this make sure to always select the specific file you want to download on Curse, because it may give you the wrong MC version otherwise)")
     .option("-D, --unregister", "Removes the CurseForge URL handler")
     // .option("-s, --system", "Register the URL handler system-wide (needs admin perms)")
@@ -403,7 +412,7 @@ const wait = (ms: number) => {
             setTimeout(() => {
                 return resolve();
             }, ms);
-        } catch(e) {
+        } catch (e) {
             return reject(e);
         }
     });
@@ -413,9 +422,12 @@ const mcLauncherTmpPath = path.join(os.tmpdir(), "mcbuilder-mc-launcher-tmp");
 
 program
     .command("run")
+    .description("Launches the pack in the minecraft launcher")
+    .option("-B, --bin <path>", "Path to the minecraft launcher binary")
     .option("-w, --workDir <dir>", "Work dir for the mc launcher, a temporary directory is used otherwise")
     .action(async (options) => {
         const mcWorkDir = options.workDir || mcLauncherTmpPath;
+        const launcherBin = 'minecraft-launcher' || options.bin;
 
         fs.ensureDirSync(mcWorkDir);
 
@@ -423,8 +435,8 @@ program
 
         if (!fs.existsSync(launcherProfilesJsonPath)) {
             let mcProc;
-            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcWorkDir]);
-        
+            mcProc = child_process.spawn(launcherBin, ['--workDir', mcWorkDir]);
+
             await wait(3000);
 
             mcProc.kill();
@@ -461,7 +473,7 @@ program
 
         {
             let mcProc;
-            mcProc = child_process.spawn('minecraft-launcher', ['--workDir', mcWorkDir]);
+            mcProc = child_process.spawn(launcherBin, ['--workDir', mcWorkDir]);
         }
 
         cleanup();
