@@ -1,8 +1,9 @@
 {
   "name": "mcbuilder",
-  "version": "1.2.1",
+  "version": "1.2.2",
   "description": "Command line modpack builder for Minecraft!",
   "main": "src/index.ts",
+  "preferGlobal": true,
   "scripts": {
     "watch": "nodemon -w ./src --exec \"npm run build || exit 1\" -e \"ts\"",
     "build": "tsc",
