@@ -31,7 +31,7 @@ export class Manifest {
     }
 
     toJSON(): any {
-        this.dependencies.sort((a,b) => a.getFileName().localeCompare(b.getFileName()))
+        this.dependencies.sort((a,b) => (a.getFileName() && b.getFileName()) ? a.getFileName().localeCompare(b.getFileName()) : -1);
 
         const dependencies = this.getDeps(PackDepType.COMMON).map(el => el.toJSON());
         const clientDependencies = this.getDeps(PackDepType.CLIENT).map(el => el.toJSON());
@@ -81,4 +81,26 @@ export class Manifest {
             });
         })
     }
+}
+
+export function convertCfPackManifest(packManifest: any) {
+    const manifest = new Manifest(packManifest.name.trim(), packManifest.minecraft.version, "", packManifest.author);
+
+    const modLoaders = packManifest.minecraft.modLoaders;
+
+    if (modLoaders) {
+        const id = (modLoaders[0].id as string);
+        if (id.includes("forge")) {
+            manifest.forgeVersion = id.substr(id.indexOf("-")+1);
+        }
+    }
+
+    packManifest.files.forEach((el: any) => {
+        console.log(el)
+        manifest.dependencies.push(new CFFile(manifest, el.projectID, el.fileID));
+    });
+
+    // console.log(packManifest.files)
+
+    return manifest;
 }

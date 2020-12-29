@@ -6,6 +6,19 @@ const CURSEMETA_API_URL = `https://addons-ecs.forgesvc.net/api/v2`;
 
 const log = console;
 
+const doubleMap = (o: any) => {
+    Object.keys(o).forEach(k => {
+        const v = o[k];
+        o[v] = k;
+    })
+    return o;
+}
+
+export const CATEGORY_ID = doubleMap({
+    mods: 8,
+    modpacks: 4471
+});
+
 export const sortByDate = (a: any, b: any) => {
     const dateA = new Date(a.fileDate), dateB = new Date(b.fileDate);
     return new Date(dateB.getMilliseconds() - dateA.getMilliseconds());
@@ -82,7 +95,7 @@ export const getSearch = (
     const url = `${CURSEMETA_API_URL}/addon/search`;
     const params: {} = {
         gameId: 432,
-        sectionId: type === 'mods' ? 6 : 4471,
+        sectionId: CATEGORY_ID[type],
         categoryId: 0,
         pageSize,
         sort,

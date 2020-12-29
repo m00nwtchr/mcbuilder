@@ -13,4 +13,5 @@ export interface CFProjectInfo {
         [id: string]: FileInfo[];
     };
     slug: string;
+    categorySection: {id:number,gameCategoryId:number};
 }

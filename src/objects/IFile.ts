@@ -7,6 +7,7 @@ export interface IFile {
     getUpdateRef(): Promise<IFile>;
     getDepType(): PackDepType;
     getDependencies(depType: FileDepType): Promise<IFile[]>;
+    isModpack(): boolean;
     equals(other: IFile): boolean;
 }
 

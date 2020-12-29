@@ -55,8 +55,12 @@ export class CFFile implements IFile {
 
 			if (this.fileId === undefined) {
 				try {
-					this.fileId = this.projectInfo.gameVersionLatestFiles[this.manifest.gameVersion][0].id;
-				}
+					console.log(this.projectInfo)
+					if (this.isModpack() || !this.manifest.gameVersion) {
+						this.fileId = this.projectInfo.defaultFileId;
+					} else {
+						this.fileId = this.projectInfo.gameVersionLatestFiles[this.manifest.gameVersion][0].id;
+					}				}
 				catch (e) {
 					// console.error("No file found for current game version!");
 					// console.debug(e);
@@ -64,7 +68,22 @@ export class CFFile implements IFile {
 					throw new Error("No file found for current game version!")
 				}
 			}
+
 			this.info = files.filter(el => el.id === this.fileId)[0];
+
+			if (!this.info) {
+				try {
+					console.log(this.projectInfo.gameVersionLatestFiles[this.manifest.gameVersion])
+					this.fileId = this.projectInfo.gameVersionLatestFiles[this.manifest.gameVersion][0].id;
+					this.info = files.filter(el => el.id === this.fileId)[0];
+				}
+				catch (e) {
+					// console.error("No file found for current game version!");
+					// console.debug(e);
+					// process.exit(1);
+					throw new Error(`The requested file (${this.fileId}) was not found, and no file for the current game version (${this.manifest.gameVersion}) was found`)
+				}
+			}
 
 			this.fileName = this.info.fileName;
 
@@ -107,6 +126,11 @@ export class CFFile implements IFile {
 		}
 			
 		return Promise.resolve(res.map(obj => new CFFile(this.manifest, obj.addonId)));
+	}
+
+	isModpack(): boolean {
+		console.log(curse.CATEGORY_ID)
+		return this.projectInfo.categorySection.gameCategoryId === curse.CATEGORY_ID["modpacks"];
 	}
 
 	// equals(other: IFile): boolean {

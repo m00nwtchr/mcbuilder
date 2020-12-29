@@ -2,12 +2,14 @@
 import fs from "fs-extra";
 import path from "path";
 import child_process from "child_process";
-import os, { userInfo } from "os";
+import os, { type, userInfo } from "os";
 import { parse as urlParse, UrlWithParsedQuery } from "url";
 
+import cheerio from "cheerio";
 import lockfile, { lock } from "lockfile";
 import sevenBin from "7zip-bin";
-import Zip from "node-7z";
+import z from "node-7z";
+const Zip = zipPromise(z);
 import axios from "axios";
 import promptly from 'promptly';
 import commander, { parse } from 'commander';
@@ -15,13 +17,23 @@ const program = new commander.Command();
 
 import * as curse from "./utils/cursemeta";
 import { downloadFile } from "./utils/downloader";
-import { Manifest } from "./objects/Manifest";
+import { convertCfPackManifest, Manifest } from "./objects/Manifest";
 import { CFFile } from "./objects/CFFile";
 import { FileDepType, IFile, PackDepType } from "./objects/IFile";
 
-const tmpFilePath = path.join(os.tmpdir(), 'last-mcbuilder-path');
-
 const packageInfo = JSON.parse(fs.readFileSync(path.join(__dirname, "..", "package.json")).toString("utf8"));
+
+const appData = process.env[process.platform === 'win32' ? 'APPDATA' : (process.platform === 'linux' ? 'XDG_CONFIG_HOME' : '')] || (process.platform === 'linux' && os.homedir() + "/.config") || (process.platform === "darwin" && os.homedir() + "/Library/Application Support");
+const userData = path.join(appData, packageInfo.name);
+
+const userSettingsPath = path.join(userData, 'settings.json');
+
+const defaultUserSettings: { lastPath?: string, instanceDir?: string } = {
+    lastPath: '',
+    instanceDir: path.join(userData, 'instances')
+};
+
+let userSettings: typeof defaultUserSettings = {};
 
 function findManifest(directory?: string): string {
     if (directory === undefined) {
@@ -29,22 +41,37 @@ function findManifest(directory?: string): string {
     }
 
     const p = path.resolve(directory, "manifest.json");
+    const pa = userSettings.lastPath && path.join(userSettings.lastPath, "manifest.json");
 
     if (fs.existsSync(p)) {
         return p;
-    } else if (fs.existsSync(tmpFilePath)) {
-        const pa = fs.readFileSync(tmpFilePath).toString("utf8");
-        if (fs.existsSync(path.join(pa, "manifest.json"))) {
-            process.chdir(pa);
-            return findManifest();
-        }
+    } else if (fs.existsSync(pa)) {
+        process.chdir(path.dirname(pa));
+        return findManifest();
     } else {
         return null;
     }
 }
 
 let manifest: Manifest;
-const manifestPath = findManifest();
+let manifestPath: string;
+
+function loadSettings() {
+    if (fs.existsSync(userSettingsPath)) {
+        userSettings = JSON.parse(fs.readFileSync(userSettingsPath).toString("utf8"));
+    } else {
+        userSettings = Object.assign({}, defaultUserSettings);
+    }
+    return userSettings;
+}
+
+function saveSettings() {
+    userSettings.lastPath = process.cwd();
+
+    fs.ensureDirSync(userData)
+
+    fs.writeFileSync(userSettingsPath, JSON.stringify(Object.assign({}, defaultUserSettings, userSettings), null, "\t"));
+}
 
 function saveManifest() {
     fs.writeFileSync(manifestPath, JSON.stringify(manifest.toJSON(), null, "\t"))
@@ -139,37 +166,86 @@ program
             if (!fs.existsSync('.gitignore'))
                 fs.writeFileSync('.gitignore', gitignore);
 
-            saveLastPath();
+            saveSettings();
         }
     });
 
-const parseUrl = (str: string, opts?: any): IFile => {
+/**
+ * Convert slug to project id
+ * @deprecated Doesn't work because of cloudflare
+ */
+const slugToId = async (slug: string): Promise<number> => {
+    const URL = `https://www.curseforge.com/minecraft/mc-mods/${slug}`;
+
+    const resp = await axios.get(URL);
+    const $ = cheerio.load(resp.data.toString());
+
+    const el = $('body > div.flex.flex-col.min-h-full.min-h-screen > main > div.z-0 > div.mx-auto.container.pb-5 > section > aside > div > div > div:nth-child(1) > div.flex.flex-col.mb-3 > div:nth-child(1) > span:nth-child(2)');
+
+    return parseInt(el.text());
+}
+
+const parseUrl = async (str: string | number, opts?: any): Promise<IFile> => {
     let url: UrlWithParsedQuery;
 
     try {
-        url = urlParse(str, true);
+        if (typeof str === 'string')
+            url = urlParse(str, true);
     } catch (e) { }
 
     switch ((url && url.protocol) || '') {
-        case ("curseforge:"):
-            if (url.host === "install") {
-                const addonId = parseInt(url.query['addonId'] as string);
-                const fileId = parseInt(url.query['fileId'] as string);
+        case ("curseforge:"): {
+            const addonId = parseInt(url.query['addonId'] as string);
+            const fileId = parseInt(url.query['fileId'] as string);
 
-                return new CFFile(manifest, addonId, opts.urlFile ? fileId : undefined);
-            } else {
-                process.exit(0);
-            }
-        default:
-            try {
-                const addonId = parseInt(str);
+            return new CFFile(manifest, addonId, opts.urlFile ? fileId : undefined);
+        }
+        // case ("http:"):
+        // case ("https:"):
+        // if (url.host.match(/.*curseforge.*/)) {
+        //     const spl = url.path.split("/");
+        //     const slug = spl[spl.length - 1];
 
-                return new CFFile(manifest, addonId);
-            } catch (e) {
+        //     return await parseUrl(await slugToId(slug), opts);
+        // }
+        // break;
+        default: {
+            const addonId = typeof str === 'string' ? parseInt(str) : str;
+
+            if (addonId === NaN) {
                 throw new Error(`Not a supported mod source URL: ${str}`)
             }
-            break;
+
+            return new CFFile(manifest, addonId);
+        }
     }
+}
+
+function zipPromise(zip: typeof z): typeof z {
+    const newZip: typeof z = {
+
+    };
+
+    Object.keys(zip).forEach((key) => {
+        const el = (zip as any)[key];
+
+        if (el instanceof Function) {
+            (newZip as any)[key] = function () {
+                const arg = Array.from(arguments);
+                return new Promise<void>((resolve, reject) => {
+                    const z = (el as Function).call(zip, ...arg);
+                    z.on("end", () => {
+                        // console.dir(el.toString())
+                        // console.dir(z, {depth:3})
+                        resolve();
+                    })
+                    z.on("error", (err:any)=>reject(err));
+                })
+            }
+        }
+    });
+
+    return newZip;
 }
 
 program
@@ -177,7 +253,7 @@ program
     .description("Remove a mod, url can be a curseforge project id")
     .action(async (url: string) => {
 
-        const removeRef: IFile = parseUrl(url);
+        const removeRef: IFile = await parseUrl(url);
 
         manifest.dependencies = manifest.dependencies.filter(el => !el.equals(removeRef));
         saveManifest();
@@ -216,25 +292,104 @@ const add = async (ref: IFile, depType: PackDepType, all?: IFile[]): Promise<IFi
     return all;
 }
 
+const installModpack = async (ref: IFile) => {
+    if (lockfile.checkSync("pack.lock"))
+        lockfile.unlockSync("pack.lock");
+
+    const filePath = path.join(userData, "cache", ref.getFileName())
+
+    fs.ensureDirSync(path.dirname(filePath));
+
+    if (!fs.existsSync(filePath)) {
+        await ref.fetch();
+        await downloadFile(filePath, await ref.getDownloadUrl(), percent => {
+            console.log(`Downloading ${ref.getFileName()}. ${percent}% Done`);
+        });
+    }
+
+    if (ref instanceof CFFile) {
+        const tmpDir = fs.mkdtempSync(os.tmpdir()+"/");
+        // console.dir(Zip)
+        await (Zip as any).extractFull(filePath, tmpDir, {
+            $bin: sevenBin.path7za,
+            // recursive: true,
+        });
+
+        const packManifest = JSON.parse(fs.readFileSync(path.join(tmpDir, "manifest.json")).toString("utf8"));
+
+        manifest = convertCfPackManifest(packManifest);
+
+        const cwd = process.cwd();
+        const p = path.join(userSettings.instanceDir, manifest.name);
+        fs.ensureDirSync(p);
+        process.chdir(p);
+
+        fs.ensureFileSync("manifest.json");
+        manifestPath = findManifest();
+
+        saveManifest();
+        saveSettings();
+
+        const runDir = path.join("run");
+        if (packManifest.overrides) {
+            const pa = path.join("overrides");
+
+            fs.ensureDirSync(pa);
+            fs.ensureDirSync(runDir);
+
+            fs.moveSync(path.join(tmpDir, packManifest.overrides), pa, {
+                overwrite: true
+            })
+
+            const list = fs.readdirSync(pa);
+            list.filter(el => el !== "mods").forEach(el => {
+                fs.ensureSymlinkSync(path.join(pa, el), path.join(runDir, path.parse(el).name))
+            });
+        }
+
+        fs.ensureDirSync("mods")
+        fs.ensureSymlinkSync("mods", path.join(runDir, "mods"));
+
+        await installAll();
+
+        saveManifest();
+        // saveSettings();
+
+        // console.log(tmpDir)
+
+        // process.chdir(cwd);
+        fs.removeSync(tmpDir);
+    }
+}
+
 program
     .command("add <url>")
     .description("Adds a mod, url can be a CF project id or a curseforge:// url")
     .option("-f, --file <fileId>", "If adding by CurseForge project id, use this to specify the file, otherwise latest for current game version is used")
-    .option("--urlFile", "If used to handle an url, this tells the program to extract the file id from the url rather than try to look for it itself (NOT RECCOMENDED")
+    // .option("--urlFile", "If used to handle an url, this tells the program to extract the file id from the url rather than try to look for it itself (NOT RECCOMENDED")
     .option("-C, --client", "If specified, the file will be added as a client-only dependency.")
     .option("-S, --server", "If specified, the file will be added as a server-only dependency.")
     .action(async (url: string, options) => {
-        const ref = parseUrl(url, { urlFile: options.urlFile });
+        const ref = await parseUrl(url, { urlFile: options.urlFile });
 
         if (ref instanceof CFFile) {
             ref.fileId = options.file ? parseInt(options.file) : undefined;
         }
 
-        const all = await add(ref, options.client ? PackDepType.CLIENT : options.server ? PackDepType.SERVER : PackDepType.COMMON);
+        console.log("ADD")
 
-        await Promise.all(all.map(async ref => {
-            return await install(ref);
-        }));
+        await ref.fetch();
+
+        if (!ref.isModpack()) {
+            const all = await add(ref, options.client ? PackDepType.CLIENT : options.server ? PackDepType.SERVER : PackDepType.COMMON);
+
+            await Promise.all(all.map(async ref => {
+                return await install(ref);
+            }));
+        } else {
+            console.log("modpac")
+            await installModpack(ref);
+        }
 
         cleanup();
     });
@@ -250,34 +405,45 @@ const install = async (ref: IFile) => {
     }
 }
 
+const installAll = async (options: {update?: any} = {}) => {
+    const updated: IFile[] = [];
+
+    await Promise.all(manifest.dependencies.map(el => {
+        return new Promise<void>(async (resolve, reject) => {
+            if (!el.getFileName()) {
+                await el.fetch();
+            }
+
+            let p = path.join("mods", el.getFileName());
+
+            if (options.update) {
+                await el.fetch();
+                if (el.canUpdate()) {
+                    if (fs.existsSync(p))
+                        fs.unlinkSync(p);
+                    el = await el.getUpdateRef();
+                    p = path.join("mods", el.getFileName());
+                    updated.push(el);
+                    //console.dir((await el.getUpdateRef()).getFileName());
+                }
+            }
+
+            await install(el);
+
+            return resolve();
+        });
+    }));
+
+    return updated;
+}
+
 program
     .command("install")
     .description("Downloads all the mods described in the manifest")
     .option("-U, --update", "If specified, the program will look for updates for all the mods it knows sources of.")
     .action(async (options) => {
-        const updated: IFile[] = [];
 
-        await Promise.all(manifest.dependencies.map(el => {
-            return new Promise(async (resolve, reject) => {
-                let p = path.join("mods", el.getFileName());
-
-                if (options.update) {
-                    await el.fetch();
-                    if (el.canUpdate()) {
-                        if (fs.existsSync(p))
-                            fs.unlinkSync(p);
-                        el = await el.getUpdateRef();
-                        p = path.join("mods", el.getFileName());
-                        updated.push(el);
-                        //console.dir((await el.getUpdateRef()).getFileName());
-                    }
-                }
-
-                install(el);
-
-                return resolve();
-            });
-        }));
+        const updated = await installAll(options);
 
         updated.forEach(el => {
             manifest.addDep(el);
@@ -292,7 +458,7 @@ program
     .option("-f, --format [format]", `select the export format, default is CurseForge (Twitch) format
     Formats:
     cf  - CurseForge`, "cf")
-    .action((options) => {
+    .action(async (options) => {
         switch (options.format) {
             case ("cf"):
                 const cfManifest = {
@@ -318,7 +484,7 @@ program
                                 required: true
                             }
                         }),
-
+                    overrides: "overrides"
                 }
 
                 if (fs.existsSync("build")) fs.rmdirSync("build", { recursive: true });
@@ -344,14 +510,23 @@ program
                 fs.copySync("overrides", overridesPath, { recursive: true });
 
                 process.chdir("build");
-                const z = (Zip as any).add(path.join("..", "out", `${manifest.name}.zip`), path.join("**"), {
+
+                await (Zip as any).add(path.join("..", "out", `${manifest.name}.zip`), path.join("**"), {
                     $bin: sevenBin.path7za,
                     recursive: true,
-                })
-                z.on("end", () => {
-                    process.chdir("..");
-                    fs.removeSync("build");
-                })
+                });
+
+                process.chdir("..");
+                fs.removeSync("build");
+
+                // const z = (Zip as any).add(path.join("..", "out", `${manifest.name}.zip`), path.join("**"), {
+                //     $bin: sevenBin.path7za,
+                //     recursive: true,
+                // });
+                // z.on("end", () => {
+                //     process.chdir("..");
+                //     fs.removeSync("build");
+                // })
 
                 break;
             case ("raw"):
@@ -407,7 +582,7 @@ program
     })
 
 const wait = (ms: number) => {
-    return new Promise((resolve, reject) => {
+    return new Promise<void>((resolve, reject) => {
         try {
             setTimeout(() => {
                 return resolve();
@@ -418,20 +593,19 @@ const wait = (ms: number) => {
     });
 }
 
-const mcLauncherTmpPath = path.join(os.tmpdir(), "mcbuilder-mc-launcher-tmp");
-
 program
     .command("run")
     .description("Launches the pack in the minecraft launcher")
     .option("-B, --bin <path>", "Path to the minecraft launcher binary")
     .option("-w, --workDir <dir>", "Work dir for the mc launcher, a temporary directory is used otherwise")
     .action(async (options) => {
-        const mcWorkDir = options.workDir || mcLauncherTmpPath;
+        const mcWorkDir = options.workDir || path.join(userData, "launcher");
         const launcherBin = 'minecraft-launcher' || options.bin;
 
         fs.ensureDirSync(mcWorkDir);
 
         const launcherProfilesJsonPath = path.join(mcWorkDir, "launcher_profiles.json")
+        const gameVersionsPath = path.join(mcWorkDir, "versions");
 
         if (!fs.existsSync(launcherProfilesJsonPath)) {
             let mcProc;
@@ -442,15 +616,16 @@ program
             mcProc.kill();
         }
 
-        const forgeVersionName = `${manifest.gameVersion}-forge-${manifest.forgeVersion}`;
+        let forgeVersionName = `${manifest.gameVersion}-forge-${manifest.forgeVersion}`;
+        const forgeVersionNameAlt = `${manifest.gameVersion}-forge${manifest.gameVersion}-${manifest.forgeVersion}`;
 
-        if (!fs.existsSync(path.join(mcWorkDir, "versions", forgeVersionName))) {
+        if (!fs.existsSync(path.join(gameVersionsPath, forgeVersionName)) && !fs.existsSync(path.join(gameVersionsPath, forgeVersionNameAlt))) {
             const forgeInstllerName = `forge-${manifest.gameVersion}-${manifest.forgeVersion}-installer.jar`;
             const forgeInstallerPath = path.join(mcWorkDir, forgeInstllerName);
 
             const forgeInstallerURL = `http://files.minecraftforge.net/maven/net/minecraftforge/forge/${manifest.gameVersion}-${manifest.forgeVersion}/${forgeInstllerName}`
 
-            if (!fs.existsSync(forgeInstallerURL))
+            if (!fs.existsSync(forgeInstallerPath))
                 await downloadFile(forgeInstallerPath, forgeInstallerURL, percent => {
                     console.log(`Downloading ${forgeInstllerName}. ${percent}% Done`);
                 });
@@ -461,6 +636,13 @@ program
         }
 
         const launcherProfiles = JSON.parse(fs.readFileSync(launcherProfilesJsonPath).toString("utf8"));
+
+        if (!launcherProfiles.profiles || !launcherProfiles.profiles["mcbuilder"])
+            launcherProfiles.profiles = {};
+
+        if (!fs.existsSync(path.join(gameVersionsPath, forgeVersionName))) {
+            forgeVersionName = forgeVersionNameAlt;
+        }
 
         launcherProfiles.profiles['mcbuilder'] = {
             name: manifest.name,
@@ -473,7 +655,9 @@ program
 
         {
             let mcProc;
-            mcProc = child_process.spawn(launcherBin, ['--workDir', mcWorkDir]);
+            mcProc = child_process.spawn(launcherBin, ['--workDir', mcWorkDir], {
+                stdio: "inherit"
+            });
         }
 
         cleanup();
@@ -489,11 +673,7 @@ function cleanExit(code: number, err?: Error) {
 function cleanup() {
     if (lockfile.checkSync("repo.lock"))
         lockfile.unlockSync("pack.lock");
-}
-
-function saveLastPath() {
-    if (process.getuid() !== 0)
-        fs.writeFileSync(tmpFilePath, process.cwd())
+    saveSettings();
 }
 
 program.exitOverride(err => cleanExit(1, err))
@@ -505,6 +685,10 @@ if (process.argv.length <= 2) {
 if (lockfile.checkSync("pack.lock")) {
     console.log("Waiting for other mcbuilder process to quit... Delete pack.lock if you're sure this is an error")
 }
+loadSettings();
+
+manifestPath = findManifest();
+
 lockfile.lock("pack.lock", { wait: Number.MAX_VALUE }, (err) => {
     if (err) {
         console.error(err);
@@ -520,8 +704,7 @@ lockfile.lock("pack.lock", { wait: Number.MAX_VALUE }, (err) => {
         fs.ensureDirSync(path.join("overrides", "config"))
         fs.ensureSymlinkSync(path.join("overrides", "config"), path.join("run", "config"));
 
-
-        saveLastPath();
+        saveSettings();
 
         program.parse(process.argv);
         // checkFS();
