@@ -644,12 +644,12 @@ program
             forgeVersionName = forgeVersionNameAlt;
         }
 
-        launcherProfiles.profiles['mcbuilder'] = {
+        launcherProfiles.profiles['mcbuilder'] = Object.assign({}, launcherProfiles.profiles['mcbuilder'], {
             name: manifest.name,
             type: 'custom',
             lastVersionId: forgeVersionName,
             gameDir: path.resolve("run")
-        };
+        });
 
         fs.writeFileSync(launcherProfilesJsonPath, JSON.stringify(launcherProfiles, null, 2))
 
